@@ -2,10 +2,8 @@ name: Stock Monitor Bot
 
 on:
   schedule:
-    # Every 15 minutes during broad US market window (UTC)
-    # Covers both EST and EDT roughly 13:00–21:00 UTC
-    - cron: '*/15 13-20 * * 1-5'
-  workflow_dispatch:   # allows manual run from GitHub UI
+    - cron: '*/15 8-20 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   run-bot:

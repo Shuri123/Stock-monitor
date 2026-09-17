@@ -10,14 +10,21 @@ import requests
 from config import *
 
 def is_market_open() -> bool:
-    """Check if US regular market hours (Mon-Fri 9:30-16:00 ET)"""
+    """Pre-market + regular hours: Mon-Fri 04:00-16:00 ET"""
     et = pytz.timezone("America/New_York")
     now = datetime.now(et)
-    if now.weekday() >= 5:  # Sat/Sun
+    if now.weekday() >= 5:
         return False
-    market_open = dtime(9, 30)
-    market_close = dtime(16, 0)
-    return market_open <= now.time() <= market_close
+    start = dtime(4, 0)
+    end = dtime(16, 0)
+    return start <= now.time() <= end
+
+def session_label() -> str:
+    et = pytz.timezone("America/New_York")
+    now = datetime.now(et).time()
+    if now < dtime(9, 30):
+        return "Pre-Market"
+    return "Regular"
 
 def calculate_rsi(series: pd.Series, period: int = 14) -> float:
     delta = series.diff()
@@ -29,7 +36,6 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> float:
 
 def get_stock_signals(ticker: str) -> dict | None:
     try:
-        # Batch-friendly + rate-limit friendly
         data = yf.download(ticker, period="3mo", interval="1d", progress=False, auto_adjust=True)
         if data.empty or len(data) < 50:
             return None
@@ -39,6 +45,23 @@ def get_stock_signals(ticker: str) -> dict | None:
 
         current_price = float(close.iloc[-1])
         prev_close = float(close.iloc[-2])
+
+        try:
+            live = yf.download(
+                ticker,
+                period="1d",
+                interval="1m",
+                progress=False,
+                prepost=True,
+                auto_adjust=True,
+            )
+            if live is not None and not live.empty:
+                live_close = live["Close"].squeeze()
+                if hasattr(live_close, "iloc") and len(live_close) > 0:
+                    current_price = float(live_close.iloc[-1])
+        except Exception:
+            pass
+
         pct_change = ((current_price - prev_close) / prev_close) * 100
 
         sma20 = float(close.rolling(20).mean().iloc[-1])
@@ -75,7 +98,7 @@ def get_stock_signals(ticker: str) -> dict | None:
             "sma20": sma20,
             "sma50": sma50,
             "vol_ratio": vol_ratio,
-            "signals": signals
+            "signals": signals,
         }
     except Exception as e:
         print(f"Error {ticker}: {e}")
@@ -83,27 +106,31 @@ def get_stock_signals(ticker: str) -> dict | None:
 
 def get_news(ticker: str) -> list[dict]:
     news = []
-    # Yahoo Finance RSS (very reliable for stocks)
     yahoo_url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
     try:
         feed = feedparser.parse(yahoo_url)
         for entry in feed.entries[:NEWS_LIMIT]:
-            title = entry.get("title", "")
-            link = entry.get("link", "")
-            published = entry.get("published", "")
-            news.append({"title": title, "link": link, "source": "Yahoo", "published": published})
+            news.append({
+                "title": entry.get("title", ""),
+                "link": entry.get("link", ""),
+                "source": "Yahoo",
+                "published": entry.get("published", ""),
+            })
     except Exception:
         pass
 
-    # Google News as backup / extra coverage
     google_url = f"https://news.google.com/rss/search?q={ticker}+stock&hl=en-US&gl=US&ceid=US:en"
     try:
         feed = feedparser.parse(google_url)
         for entry in feed.entries[:3]:
             title = entry.get("title", "")
-            link = entry.get("link", "")
             if not any(n["title"] == title for n in news):
-                news.append({"title": title, "link": link, "source": "Google", "published": entry.get("published", "")})
+                news.append({
+                    "title": title,
+                    "link": entry.get("link", ""),
+                    "source": "Google",
+                    "published": entry.get("published", ""),
+                })
     except Exception:
         pass
 
@@ -134,7 +161,7 @@ def send_telegram(message: str):
         "chat_id": chat_id,
         "text": message,
         "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "disable_web_page_preview": True,
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
@@ -148,13 +175,14 @@ def main():
         print("Market closed – skipping")
         return
 
-    print(f"Running at {datetime.now(pytz.timezone('America/New_York'))}")
+    session = session_label()
+    now_et = datetime.now(pytz.timezone("America/New_York"))
+    print(f"Running at {now_et} ({session})")
 
     alerts = []
-    summary_lines = []
 
-    for i, ticker in enumerate(TICKERS):
-        time.sleep(1.2)  # polite delay to avoid Yahoo rate limits
+    for ticker in TICKERS:
+        time.sleep(1.2)
         data = get_stock_signals(ticker)
         if not data:
             continue
@@ -164,7 +192,6 @@ def main():
             line += "\n• " + "\n• ".join(data["signals"])
             alerts.append(line)
 
-        # News check
         news_items = get_news(ticker)
         interesting_news = []
         for item in news_items:
@@ -176,19 +203,16 @@ def main():
             news_text = f"\n📰 <b>{ticker} News</b>\n" + "\n".join(interesting_news[:3])
             alerts.append(news_text)
 
-        summary_lines.append(f"{ticker}: {data['pct_change']:+.1f}% RSI{data['rsi']:.0f}")
-
     if alerts:
-        header = f"🔔 <b>Stock Monitor – {datetime.now(pytz.timezone('America/New_York')).strftime('%H:%M ET')}</b>\n\n"
+        header = (
+            f"🔔 <b>Stock Monitor – {session}</b>\n"
+            f"{now_et.strftime('%H:%M ET')}\n\n"
+        )
         full_msg = header + "\n\n".join(alerts)
-        # Telegram has ~4096 char limit
         if len(full_msg) > 4000:
             full_msg = full_msg[:3900] + "\n\n... (truncated)"
         send_telegram(full_msg)
     else:
-        # Optional quiet status (comment out if you only want alerts)
-        quiet = f"✅ No strong signals\n" + " | ".join(summary_lines[:8])
-        # send_telegram(quiet)   # uncomment if you want heartbeat messages
         print("No strong signals")
 
 if __name__ == "__main__":

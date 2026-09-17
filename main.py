@@ -141,11 +141,11 @@ def score_news(title: str) -> str:
     pos = any(k in title_lower for k in POSITIVE_KEYWORDS)
     neg = any(k in title_lower for k in NEGATIVE_KEYWORDS)
     if pos and not neg:
-        return "🟢 Potential positive"
+        return "GREEN potential positive"
     if neg and not pos:
-        return "🔴 Potential negative"
+        return "RED potential negative"
     if pos and neg:
-        return "🟡 Mixed"
+        return "MIXED"
     return ""
 
 def send_telegram(message: str):
@@ -160,13 +160,14 @@ def send_telegram(message: str):
     payload = {
         "chat_id": chat_id,
         "text": message,
-        "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
         if not r.ok:
             print("Telegram error:", r.text)
+        else:
+            print("Telegram sent")
     except Exception as e:
         print("Telegram send failed:", e)
 
@@ -187,9 +188,9 @@ def main():
         if not data:
             continue
 
-        line = f"<b>{ticker}</b> ${data['price']:.2f} ({data['pct_change']:+.1f}%) | RSI {data['rsi']:.0f}"
+        line = f"{ticker} ${data['price']:.2f} ({data['pct_change']:+.1f}%) | RSI {data['rsi']:.0f}"
         if data["signals"]:
-            line += "\n• " + "\n• ".join(data["signals"])
+            line += "\n- " + "\n- ".join(data["signals"])
             alerts.append(line)
 
         news_items = get_news(ticker)
@@ -197,17 +198,15 @@ def main():
         for item in news_items:
             score = score_news(item["title"])
             if score:
-                interesting_news.append(f"{score}: {item['title'][:120]}")
+                clean_title = item["title"].replace("<", "").replace(">", "")[:120]
+                interesting_news.append(f"{score}: {clean_title}")
 
         if interesting_news:
-            news_text = f"\n📰 <b>{ticker} News</b>\n" + "\n".join(interesting_news[:3])
+            news_text = f"\nNEWS {ticker}\n" + "\n".join(interesting_news[:3])
             alerts.append(news_text)
 
     if alerts:
-        header = (
-            f"🔔 <b>Stock Monitor – {session}</b>\n"
-            f"{now_et.strftime('%H:%M ET')}\n\n"
-        )
+        header = f"Stock Monitor - {session}\n{now_et.strftime('%H:%M ET')}\n\n"
         full_msg = header + "\n\n".join(alerts)
         if len(full_msg) > 4000:
             full_msg = full_msg[:3900] + "\n\n... (truncated)"

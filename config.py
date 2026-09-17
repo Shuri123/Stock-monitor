@@ -3,13 +3,11 @@ TICKERS = [
     "QBTS", "OKLO", "PLTR", "HUT", "INTC", "NNOX", "NVDA", "ALAR"
 ]
 
-# Thresholds – tweak later
-VOLUME_SPIKE_MULT = 2.0          # volume > 2x 20-day average
-PRICE_CHANGE_ALERT = 3.0         # % change today
+VOLUME_SPIKE_MULT = 2.0
+PRICE_CHANGE_ALERT = 3.0
 RSI_OVERBOUGHT = 70
 RSI_OVERSOLD = 30
 
-# News keywords that often move stocks (my preferred starter list)
 POSITIVE_KEYWORDS = [
     "beats", "beat estimates", "raises guidance", "raised guidance",
     "fda approval", "fda clears", "approval", "partnership", "collaboration",
@@ -25,5 +23,4 @@ NEGATIVE_KEYWORDS = [
     "weak", "disappointing", "below expectations"
 ]
 
-# How many recent news items to check per ticker
 NEWS_LIMIT = 5
